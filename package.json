@@ -1,0 +1,45 @@
+{
+  "name": "dbg-defold",
+  "main": "./lib/dbg-defold",
+  "version": "0.1.0",
+  "description": "An interactive Defold debugger for Atom",
+  "keywords": [
+    "debug",
+    "debugger"
+  ],
+  "repository": "https://github.com/atom/dbg-defold",
+  "license": "MIT",
+  "engines": {
+    "atom": ">=1.0.0 <2.0.0"
+  },
+  "package-deps": [
+    "dbg",
+    "output-panel",
+    "Defold",
+    "lua"
+  ],
+  "dependencies": {
+    "atom-package-deps": "^4.0.1"
+  },
+  "providedServices": {
+    "dbgProvider": {
+      "description": "Provides a dbg defold debugger",
+      "versions": {
+        "1.1.0": "provideDbgProvider"
+      }
+    }
+  },
+  "consumedServices": {
+    "dbg": {
+      "versions": {
+        "^1.0.0": "consumeDbg"
+      }
+    },
+    "output-panel": {
+      "versions": {
+        "^1.0.0": "consumeOutputPanel",
+        "^0.1.0": "consumeOutputPanel"
+      }
+    }
+  }
+}
