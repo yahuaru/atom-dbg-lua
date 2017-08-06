@@ -1,6 +1,5 @@
 fs = require 'fs'
 path = require 'path'
-DbgDefoldView = require './dbg-defold-view'
 {BufferedProcess, CompositeDisposable, Emitter} = require 'atom'
 
 escapePath = (path) ->
@@ -15,7 +14,6 @@ module.exports = DbgDefold =
       default: false
   dbg: null
   logToConsole: false
-  dbgDefoldView: null
   modalPanel: null
   subscriptions: null
   outputPanel: null

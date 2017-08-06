@@ -7,7 +7,7 @@
     "debug",
     "debugger"
   ],
-  "repository": "https://github.com/atom/dbg-defold",
+  "repository": "https://github.com/yahuaru/atom-dbg-defold",
   "license": "MIT",
   "engines": {
     "atom": ">=1.0.0 <2.0.0"
