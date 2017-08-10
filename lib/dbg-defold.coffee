@@ -12,8 +12,8 @@ module.exports = DbgDefold =
       description: 'For debugging Defold problems'
       type: 'boolean'
       default: false
+  logToConsole: true
   dbg: null
-  logToConsole: false
   modalPanel: null
   subscriptions: null
   outputPanel: null
@@ -27,14 +27,10 @@ module.exports = DbgDefold =
   miEmitter: null
 
   activate: (state) ->
-    require('atom-package-deps').install('dbg-defold')
+    #require('atom-package-deps').install('dbg-defold')
 
     atom.config.observe 'dbg-defold.logToConsole', (set) =>
       @logToConsole = set
-
-    @subscriptions = new CompositeDisposable
-    @subscriptions.add atom.commands.add 'atom-workspace', 'dbg-defold:Start debugging': => @start()
-
   consumeOutputPanel: (outputPanel) ->
     @outputPanel = outputPanel
 
@@ -45,12 +41,25 @@ module.exports = DbgDefold =
 
     @start options
 
+    @miEmitter.on 'console', (line) =>
+      if @outputPanel
+        if @showOutputPanelNext
+          @showOutputPanelNext = false
+          @outputPanel.show()
+        @outputPanel.print '\x1b[37;40m'+line.replace(/([^\r\n]+)\r?\n/,'\x1b[0K$1\r\n')+'\x1b[39;49m', false
+
+    @miEmitter.on 'result', ({type, data}) =>
+      switch type
+        when 'running'
+          @ui.running()
+
   start: (options) ->
     @showOutputPanel = true
     @unseenOutputPanelContent = false
     @closedNaturally = false
     @outputPanel?.clear()
 
+    command = options.lua_executable||'cmd /C lua'
     cwd = path.resolve options.basedir||'', options.cwd||''
 
     handleError = (message) =>
@@ -59,11 +68,6 @@ module.exports = DbgDefold =
         dismissable: true
 
       @ui.stop()
-
-
-    if !fs.existsSync cwd
-      handleError "Working directory is invalid:  \n`#{cwd}`"
-      return
 
     if @outputPanel and @outputPanel.getInteractiveSession
       interactiveSession = @outputPanel.getInteractiveSession()
@@ -84,15 +88,10 @@ module.exports = DbgDefold =
           @outputPanel.show()
         @unseenOutputPanelContent = true
 
-    else if process.platform=='win32'
-      options.lua_commands = ([].concat options.lua_commands||[]).concat 'lua'
-
     @miEmitter = new Emitter()
     @process = new BufferedProcess
       command: command
       args: []
-      options:
-        cwd: cwd
       stdout: (data) =>
         if @logToConsole then console.log data
         if @outputPanel
@@ -123,8 +122,10 @@ module.exports = DbgDefold =
       else
         handleError error.message
 
-      @processAwaiting = false
-      @processQueued = []
+    @processAwaiting = false
+    @processQueued = []
+
+    @sendCommand 'require("mobdebug").listen()'
 
   stop: ->
     @errorEncountered = null
@@ -146,8 +147,8 @@ module.exports = DbgDefold =
   continue: ->
     @cleanupFrame().then =>
       @sendCommand 'run' .catch(error) =>
-        if typeof error != string then return
-        @handleMiError
+        if typeof error != 'string' then return
+        @handleMiError error
 
   pause: ->
     return
@@ -174,7 +175,6 @@ module.exports = DbgDefold =
       @sendCommand 'out'.catch(error) =>
         if typeof error != 'string' then return
         @handleMiError error
-        @handleMiError error
 
   stepOver: ->
     @cleanupFrame().then =>
@@ -197,7 +197,7 @@ module.exports = DbgDefold =
           # "done", "running" (same as done), "connected", "error", "exit"
           # https://sourceware.org/gdb/onlinedocs/gdb/GDB_002fMI-Result-Records.html#GDB_002fMI-Result-Records
           if type=='error'
-            reject data.msg||'Unknown GDB error'
+            reject data.msg||'Unknown Defold error'
           else
             resolve {type:type, data:data}
       ,new Promise (resolve, reject) =>
@@ -216,8 +216,8 @@ module.exports = DbgDefold =
       if @processQueued.length > 0
         @processQueued.shift()()
 
-    if @logToConsole then console.log 'dbg-gdb > ',command
-    @process.process.stdin.write command+'\r\n', binary: true
+    if @logToConsole then console.log 'dbg-defold > ',command
+    @process.process.stdin.write command+'\r\n'
     return promise
 
     handleMiError: (error, title) ->
@@ -227,12 +227,14 @@ module.exports = DbgDefold =
 
   addBreakpoint: (breakpoint) ->
     @breakpoints.push breakpoint
-    @sendCommand 'setb' + (escapePath breakpoint.path)+' '+breakpoint.line .cath (error) =>
-      if typeof error != 'string' then return
-      if error.match /no symbol table is loaded/i
-        atom.notifications.addError 'Unable to use breakpoints',
-          description: '\nBreakpoints cannot be used.'
-          dismissable: true
+
+    @sendCommand 'setb' + (escapePath breakpoint.path)+' '+breakpoint.line
+      .catch(error) =>
+        if typeof error != 'string' then return
+        if error.match /no symbol table is loaded/i
+          atom.notifications.addError 'Unable to use breakpoints',
+            description: '\nBreakpoints cannot be used.'
+            dismissable: true
 
   removeBreakpoint: (breakpoint) ->
     for i,compare in @breakpoints
@@ -252,8 +254,6 @@ module.exports = DbgDefold =
     canHandleOptions: (options) =>
       return new Promise(fulfill, reject) =>
         @start options
-
-        @sendCommand "require('mobdebug').listen()"
         .then =>
           @stop()
           fulfill true
