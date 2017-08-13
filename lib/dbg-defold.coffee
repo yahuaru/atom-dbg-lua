@@ -11,7 +11,7 @@ module.exports = DbgDefold =
       title: 'Log to developer console'
       description: 'For debugging Defold problems'
       type: 'boolean'
-      default: false
+      default: true
   logToConsole: true
   dbg: null
   modalPanel: null
@@ -25,6 +25,8 @@ module.exports = DbgDefold =
   closedNaturally: false
   process: null
   miEmitter: null
+  errorEncountered: null
+  variableRootObjects: {}
 
   activate: (state) ->
     #require('atom-package-deps').install('dbg-defold')
@@ -53,20 +55,39 @@ module.exports = DbgDefold =
         when 'running'
           @ui.running()
 
+    @miEmitter.on 'exec', ({type, data}) =>
+      switch type
+        when 'running'
+          @ui.running()
+        when 'connected'
+          for breakpoint in @breakpoints
+            @addBreakpoint breakpoint
+          @ui.paused()
+
+  cleanupFrame: ->
+    @errorEncountered = null
+    return new Promise (fulfill) =>
+      @sendCommand 'delallw'
+        .then =>
+          @variableObjects = {}
+          @variableRootObjects = {}
+
   start: (options) ->
     @showOutputPanel = true
     @unseenOutputPanelContent = false
     @closedNaturally = false
     @outputPanel?.clear()
 
-    command = options.lua_executable||'cmd /C lua'
+    matchAsyncHeader = /^([\^=*+])(.+?)(?:,(.*))?$/
+
+    command = options.lua_executable||'lua'
+    script = path.resolve __dirname , "debug_server.lua"
     cwd = path.resolve options.basedir||'', options.cwd||''
 
     handleError = (message) =>
       atom.notifications.addError 'Error running Defold Debugger',
         description: message
         dismissable: true
-
       @ui.stop()
 
     if @outputPanel and @outputPanel.getInteractiveSession
@@ -91,15 +112,28 @@ module.exports = DbgDefold =
     @miEmitter = new Emitter()
     @process = new BufferedProcess
       command: command
-      args: []
+      args: [script]
+
       stdout: (data) =>
-        if @logToConsole then console.log data
-        if @outputPanel
-          if @showOutputPanelNext
-            @showOutputPanelNext = false
-            @outputPanel.show()
-          @unseenOutputPanelContent = true
-          @outputPanel.print line
+        for line in data.replace(/\r?\n$/,'').split(/\r?\n/)
+          if match = line.match matchAsyncHeader
+            type = match[2]
+            data = match[3]
+
+            if @logToConsole then console.log 'dbg-defold < ',match[1],type,data
+
+            switch match[1]
+              when '^' then @miEmitter.emit 'result' , {type:type, data:data}
+              when '=' then @miEmitter.emit 'notify' , {type:type, data:data}
+              when '*' then @miEmitter.emit 'exec'   , {type:type, data:data}
+              when '+' then @miEmitter.emit 'status' , {type:type, data:data}
+          else if @outputPanel
+            if @showOutputPanelNext
+              @showOutputPanelNext = false
+              @outputPanel.show()
+            @unseenOutputPanelContent = true
+            if @logToConsole then console.log 'dbg-defold < ',line
+            @outputPanel.print line
 
       stderr: (data) =>
         if @outputPanel
@@ -125,8 +159,6 @@ module.exports = DbgDefold =
     @processAwaiting = false
     @processQueued = []
 
-    @sendCommand 'require("mobdebug").listen()'
-
   stop: ->
     @errorEncountered = null
     @variableObjects = {}
@@ -145,8 +177,8 @@ module.exports = DbgDefold =
       @outputPanel?.hide()
 
   continue: ->
-    @cleanupFrame().then =>
-      @sendCommand 'run' .catch(error) =>
+    @sendCommand 'run'
+      .catch (error) =>
         if typeof error != 'string' then return
         @handleMiError error
 
@@ -166,19 +198,19 @@ module.exports = DbgDefold =
 
   stepIn: ->
     @cleanupFrame().then =>
-      @sendCommand 'step'.catch(error) =>
+      @sendCommand 'step'.catch (error) =>
         if typeof error != 'string' then return
         @handleMiError error
 
   stepOut: ->
     @cleanupFrame().then =>
-      @sendCommand 'out'.catch(error) =>
+      @sendCommand 'out'.catch (error) =>
         if typeof error != 'string' then return
         @handleMiError error
 
   stepOver: ->
     @cleanupFrame().then =>
-      @sendCommand 'over'.catch(error) =>
+      @sendCommand 'over'.catch (error) =>
         if typeof error != 'string' then return
         @handleMiError error
 
@@ -228,8 +260,8 @@ module.exports = DbgDefold =
   addBreakpoint: (breakpoint) ->
     @breakpoints.push breakpoint
 
-    @sendCommand 'setb' + (escapePath breakpoint.path)+' '+breakpoint.line
-      .catch(error) =>
+    @sendCommand 'setb ' + (escapePath breakpoint.path)+' '+breakpoint.line
+      .catch (error) =>
         if typeof error != 'string' then return
         if error.match /no symbol table is loaded/i
           atom.notifications.addError 'Unable to use breakpoints',
@@ -241,8 +273,8 @@ module.exports = DbgDefold =
       if compare==breakpoint
         @breakpoints.splice i,1
 
-    @sendCommand 'delb' + (escapePath breakpoint.path)+' '+breakpoint.line
-      .catch(error) =>
+    @sendCommand 'delb ' + (escapePath breakpoint.path)+' '+breakpoint.line
+      .catch (error) =>
         if typeof error != 'string' then return
         @handleMiError error
 
