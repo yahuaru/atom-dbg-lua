@@ -1,9 +1,19 @@
 fs = require 'fs'
 path = require 'path'
+atomSocket = require 'atom-socket'
 {BufferedProcess, CompositeDisposable, Emitter} = require 'atom'
+net = require 'net'
 
 escapePath = (path) ->
   return (path.replace /\\/g, '/').replace /[\s\t\n]/g, '\\ '
+
+commandStatus =
+  requestAccepted: '200'
+  badRequest: '400'
+  errorInExecution: '401'
+  break: '202'
+  watch: '203'
+  output: '204'
 
 module.exports = DbgDefold =
   config:
@@ -23,10 +33,14 @@ module.exports = DbgDefold =
   showOutputPanel: false
   unseenOutputPanelContent: false
   closedNaturally: false
-  process: null
   miEmitter: null
   errorEncountered: null
+  socket: null
+  server: null
   variableRootObjects: {}
+  requestQueue: []
+  waitingResponse: false
+  running: false
 
   activate: (state) ->
     #require('atom-package-deps').install('dbg-defold')
@@ -52,17 +66,9 @@ module.exports = DbgDefold =
 
     @miEmitter.on 'result', ({type, data}) =>
       switch type
-        when 'running'
+        when 'run'
           @ui.running()
 
-    @miEmitter.on 'exec', ({type, data}) =>
-      switch type
-        when 'running'
-          @ui.running()
-        when 'connected'
-          for breakpoint in @breakpoints
-            @addBreakpoint breakpoint
-          @ui.paused()
 
   cleanupFrame: ->
     @errorEncountered = null
@@ -73,16 +79,13 @@ module.exports = DbgDefold =
           @variableRootObjects = {}
 
   start: (options) ->
+    @ui.paused()
     @showOutputPanel = true
     @unseenOutputPanelContent = false
     @closedNaturally = false
     @outputPanel?.clear()
 
     matchAsyncHeader = /^([\^=*+])(.+?)(?:,(.*))?$/
-
-    command = options.lua_executable||'lua'
-    script = path.resolve __dirname , "debug_server.lua"
-    cwd = path.resolve options.basedir||'', options.cwd||''
 
     handleError = (message) =>
       atom.notifications.addError 'Error running Defold Debugger',
@@ -110,64 +113,55 @@ module.exports = DbgDefold =
         @unseenOutputPanelContent = true
 
     @miEmitter = new Emitter()
-    @process = new BufferedProcess
-      command: command
-      args: [script]
 
-      stdout: (data) =>
-        for line in data.replace(/\r?\n$/,'').split(/\r?\n/)
-          if match = line.match matchAsyncHeader
-            type = match[2]
-            data = match[3]
+    #Server
+    @server = net.createServer (socket) =>
+        @outputPanel.print 'CONNECTED: '+socket.remoteAddress+':'+socket.remotePort
+        if @logToConsole then console.log 'CONNECTED:', socket.remoteAddress+':'+socket.remotePort
+        @socket = socket
 
-            if @logToConsole then console.log 'dbg-defold < ',match[1],type,data
+        for breakpoint in @breakpoints
+          @addBreakpoint breakpoint
 
-            switch match[1]
-              when '^' then @miEmitter.emit 'result' , {type:type, data:data}
-              when '=' then @miEmitter.emit 'notify' , {type:type, data:data}
-              when '*' then @miEmitter.emit 'exec'   , {type:type, data:data}
-              when '+' then @miEmitter.emit 'status' , {type:type, data:data}
-          else if @outputPanel
-            if @showOutputPanelNext
-              @showOutputPanelNext = false
-              @outputPanel.show()
-            @unseenOutputPanelContent = true
-            if @logToConsole then console.log 'dbg-defold < ',line
-            @outputPanel.print line
+        @socket.on 'data' , (data) =>
+          message = data.toString()
+          if @logToConsole then console.log 'DATA', socket.remoteAddress+':'+socket.remotePort, message
+          code = message.find(///[0-9+]///)
+          switch code
+            when commandStatus.requestAccepted
+              if @requestQueue.length > 0
+                request = @requestQueue.shift()
+                @miEmitter.emit 'result', {type:request.command, data:request.args}
+            when commandStatus.badRequest
+              if @requestQueue.length > 0
+                @requestQueue.shift()
 
-      stderr: (data) =>
-        if @outputPanel
-          if @outputPanelNext
-            @showOutputPanelNext = false
-            @outputPanel.show()
-          @unseenOutputPanelContent = true
-          @outputPanel.print line for line in data.replace(/\r?\n$/,'').split(/\r?\n/)
 
-      exit: (data) =>
-        @miEmitter.emit 'exit'
 
-    @process.emitter.on 'will-throw-error', (event) =>
-      event.handle()
+        @socket.on 'close', (data) =>
+          if @logToConsole then console.log 'CLOSED:', socket.remoteAddress+':'+socket.remotePort
 
-      error = event.error
 
-      if error.code =='ENOENT' && (error.syscall.indexOf 'spawn') == 0
-        handleError "Could not find `#{command}`  \nPlease ensure it is correctly installed and available in your system PATH"
-      else
-        handleError error.message
+    @outputPanel.print 'Run the program you wish to debug'
+    @server.listen(8172, 'localhost');
 
-    @processAwaiting = false
-    @processQueued = []
+    #Server end
+
+    @waitingResponse = false
+    @requestQueue = []
 
   stop: ->
     @errorEncountered = null
     @variableObjects = {}
     @variableRootObjects = {}
 
-    @process?.kill()
-    @process = null
-    @processAwaiting = false
-    @processQueued = []
+    @socket?.end()
+    @socket?.destroy()
+    @server?.close()
+    @server = null
+    @socket = null
+    @waitingResponse = false
+    @requestQueue = []
 
     if @interactiveSession
       @interactiveSession.discard()
@@ -198,69 +192,35 @@ module.exports = DbgDefold =
 
   stepIn: ->
     @cleanupFrame().then =>
-      @sendCommand 'step'.catch (error) =>
-        if typeof error != 'string' then return
-        @handleMiError error
+      @sendCommand 'step'
+        .catch (error) =>
+          if typeof error != 'string' then return
+          @handleMiError error
 
   stepOut: ->
     @cleanupFrame().then =>
-      @sendCommand 'out'.catch (error) =>
-        if typeof error != 'string' then return
-        @handleMiError error
+      @sendCommand 'out'
+        .catch (error) =>
+          if typeof error != 'string' then return
+          @handleMiError error
 
   stepOver: ->
     @cleanupFrame().then =>
-      @sendCommand 'over'.catch (error) =>
-        if typeof error != 'string' then return
-        @handleMiError error
+      @sendCommand 'over'
+        .catch (error) =>
+          if typeof error != 'string' then return
+          @handleMiError error
 
-  sendCommand: (command) ->
-    if @processAwaiting
-      return new Promise (resolve, reject) =>
-        @processQueued.push =>
-          @sendCommand command
-            .then resolve, reject
-
-    @processAwaiting = true
-    promise = Promise.race [
-      new Promise (resolve, reject) =>
-        event = @miEmitter.on 'result', ({type, data}) =>
-          event.dispose()
-          # "done", "running" (same as done), "connected", "error", "exit"
-          # https://sourceware.org/gdb/onlinedocs/gdb/GDB_002fMI-Result-Records.html#GDB_002fMI-Result-Records
-          if type=='error'
-            reject data.msg||'Unknown Defold error'
-          else
-            resolve {type:type, data:data}
-      ,new Promise (resolve, reject) =>
-        event = @miEmitter.on 'exit', =>
-          event.dispose()
-          reject 'Debugger terminated'
-    ]
-    promise.then =>
-      @processAwaiting = false
-      if @processQueued.length > 0
-        @processQueued.shift()()
-    , (error) =>
-      @processAwaiting = false
-      if typeof error != 'string'
-        console.error error
-      if @processQueued.length > 0
-        @processQueued.shift()()
-
-    if @logToConsole then console.log 'dbg-defold > ',command
-    @process.process.stdin.write command+'\r\n'
-    return promise
-
-    handleMiError: (error, title) ->
-      atom.notifications.addError title||'Error received from Defold',
-        description:'Defold:\n\n>'+error.trim().split(/\r?\n/).join('\n\n> ')
-        dismissable: true
+  sendCommand: (command, args = '') ->
+    @requestQueue.push => {command:command, args:args}
+    if @logToConsole then console.log 'dbg-defold > ',command,' ', args
+    @socket.write command.toUpperCase()+' '+args+'\n'
 
   addBreakpoint: (breakpoint) ->
     @breakpoints.push breakpoint
 
-    @sendCommand 'setb ' + (escapePath breakpoint.path)+' '+breakpoint.line
+    path = '/'+atom.project.relativizePath(breakpoint.path)[1]
+    @sendCommand 'setb', (escapePath path)+' '+breakpoint.line
       .catch (error) =>
         if typeof error != 'string' then return
         if error.match /no symbol table is loaded/i
@@ -273,7 +233,8 @@ module.exports = DbgDefold =
       if compare==breakpoint
         @breakpoints.splice i,1
 
-    @sendCommand 'delb ' + (escapePath breakpoint.path)+' '+breakpoint.line
+    path = '/'+atom.project.relativizePath(breakpoint.path)[1]
+    @sendCommand 'delb', (escapePath path)+' '+breakpoint.line
       .catch (error) =>
         if typeof error != 'string' then return
         @handleMiError error
