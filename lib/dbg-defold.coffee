@@ -1,8 +1,7 @@
 fs = require 'fs'
 path = require 'path'
-atomSocket = require 'atom-socket'
-{BufferedProcess, CompositeDisposable, Emitter} = require 'atom'
 net = require 'net'
+{BufferedProcess, CompositeDisposable, Emitter} = require 'atom'
 
 escapePath = (path) ->
   return (path.replace /\\/g, '/').replace /[\s\t\n]/g, '\\ '
@@ -41,6 +40,24 @@ module.exports = DbgDefold =
   requestQueue: []
   waitingResponse: false
   running: false
+  process: null
+
+  getFullStack: (stack) =>
+    script = __dirname+'\\lua_stack.lua'
+    @process = new BufferedProcess
+      command: 'lua'
+      args: [script]
+      options:
+        cwd: atom.project.getPaths()[0]
+      stdout: (data) =>
+        console.log data
+      stderr: (data) =>
+        console.log data
+      exit: (data) =>
+        console.log data
+
+    @process.process.stdin.write stack+'\r\n', binary: true
+
 
   activate: (state) ->
     #require('atom-package-deps').install('dbg-defold')
@@ -56,19 +73,6 @@ module.exports = DbgDefold =
     @outputPanel?.clear()
 
     @start options
-
-    @miEmitter.on 'console', (line) =>
-      if @outputPanel
-        if @showOutputPanelNext
-          @showOutputPanelNext = false
-          @outputPanel.show()
-        @outputPanel.print '\x1b[37;40m'+line.replace(/([^\r\n]+)\r?\n/,'\x1b[0K$1\r\n')+'\x1b[39;49m', false
-
-    @miEmitter.on 'result', ({type, data}) =>
-      switch type
-        when 'run'
-          @ui.running()
-
 
   cleanupFrame: ->
     @errorEncountered = null
@@ -123,18 +127,29 @@ module.exports = DbgDefold =
         for breakpoint in @breakpoints
           @addBreakpoint breakpoint
 
+        @sendCommand "basedir", [atom.project.getPaths()[0]]
+
         @socket.on 'data' , (data) =>
-          message = data.toString()
-          if @logToConsole then console.log 'DATA', socket.remoteAddress+':'+socket.remotePort, message
-          code = message.find(///[0-9+]///)
-          switch code
-            when commandStatus.requestAccepted
-              if @requestQueue.length > 0
+          response = data.toString()
+          if @logToConsole then console.log 'DATA', socket.remoteAddress+':'+socket.remotePort, response
+          messages = response.split '\n'
+          for message in messages
+            if message == "" or message == null then continue
+            code = message.match(///^([0-9]+)///)[0]
+            if @logToConsole then console.log 'code:',code
+            switch code
+              when commandStatus.requestAccepted
                 request = @requestQueue.shift()
-                @miEmitter.emit 'result', {type:request.command, data:request.args}
-            when commandStatus.badRequest
-              if @requestQueue.length > 0
-                @requestQueue.shift()
+                switch request.command
+                  when 'run'
+                    @ui.running()
+                  when 'stack'
+                    @getFullStack message
+              when commandStatus.badRequest
+                if @requestQueue.length > 0
+                  @requestQueue.shift()
+              when commandStatus.break
+                @sendCommand 'stack'
 
 
 
@@ -172,9 +187,6 @@ module.exports = DbgDefold =
 
   continue: ->
     @sendCommand 'run'
-      .catch (error) =>
-        if typeof error != 'string' then return
-        @handleMiError error
 
   pause: ->
     return
@@ -193,40 +205,26 @@ module.exports = DbgDefold =
   stepIn: ->
     @cleanupFrame().then =>
       @sendCommand 'step'
-        .catch (error) =>
-          if typeof error != 'string' then return
-          @handleMiError error
 
   stepOut: ->
     @cleanupFrame().then =>
       @sendCommand 'out'
-        .catch (error) =>
-          if typeof error != 'string' then return
-          @handleMiError error
 
   stepOver: ->
     @cleanupFrame().then =>
       @sendCommand 'over'
-        .catch (error) =>
-          if typeof error != 'string' then return
-          @handleMiError error
 
-  sendCommand: (command, args = '') ->
-    @requestQueue.push => {command:command, args:args}
-    if @logToConsole then console.log 'dbg-defold > ',command,' ', args
-    @socket.write command.toUpperCase()+' '+args+'\n'
+  sendCommand: (command, args = ['']) ->
+    @requestQueue.push {command:command, args:args}
+    arg = args.join ' '
+    if @logToConsole then console.log 'dbg-defold > ',command,' ', arg
+    @socket.write command.toUpperCase()+' '+arg+'\n'
 
   addBreakpoint: (breakpoint) ->
     @breakpoints.push breakpoint
 
     path = '/'+atom.project.relativizePath(breakpoint.path)[1]
-    @sendCommand 'setb', (escapePath path)+' '+breakpoint.line
-      .catch (error) =>
-        if typeof error != 'string' then return
-        if error.match /no symbol table is loaded/i
-          atom.notifications.addError 'Unable to use breakpoints',
-            description: '\nBreakpoints cannot be used.'
-            dismissable: true
+    @sendCommand 'setb', [(escapePath path), breakpoint.line]
 
   removeBreakpoint: (breakpoint) ->
     for i,compare in @breakpoints
@@ -234,10 +232,7 @@ module.exports = DbgDefold =
         @breakpoints.splice i,1
 
     path = '/'+atom.project.relativizePath(breakpoint.path)[1]
-    @sendCommand 'delb', (escapePath path)+' '+breakpoint.line
-      .catch (error) =>
-        if typeof error != 'string' then return
-        @handleMiError error
+    @sendCommand 'delb', [(escapePath path), breakpoint.line]
 
 
   provideDbgProvider: ->
