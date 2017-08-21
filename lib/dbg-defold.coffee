@@ -43,20 +43,24 @@ module.exports = DbgDefold =
   process: null
 
   getFullStack: (stack) =>
-    script = __dirname+'\\lua_stack.lua'
-    @process = new BufferedProcess
-      command: 'lua'
-      args: [script]
-      options:
-        cwd: atom.project.getPaths()[0]
-      stdout: (data) =>
-        console.log data
-      stderr: (data) =>
-        console.log data
-      exit: (data) =>
-        console.log data
+    return new Promise (resolve, reject) ->
+      output = ''
+      script = __dirname+'\\lua_stack.lua'
+      @process = new BufferedProcess
+        command: 'lua'
+        args: [script]
+        options:
+          cwd: atom.project.getPaths()[0]
+        stdout: (data) =>
+          output += data
+        stderr: (data) =>
+          output += data
+          reject output
+        exit: (data) =>
+          result = JSON.parse output
+          resolve result
 
-    @process.process.stdin.write stack+'\r\n', binary: true
+      @process.process.stdin.write stack+'\r\n', binary: true
 
 
   activate: (state) ->
@@ -144,7 +148,20 @@ module.exports = DbgDefold =
                   when 'run'
                     @ui.running()
                   when 'stack'
-                    @getFullStack message
+                    @getFullStack(message)
+                    .then (response) ->
+                      result_stack = []
+                      for func in response
+                        result_stack.push
+                          local: true
+                          file: func.at_file
+                          line: func.at_line
+                          name: func.name
+                          path: func.at_file
+                          error: undefined
+                    .catch (error) ->
+                      console.error 'failed', error
+
               when commandStatus.badRequest
                 if @requestQueue.length > 0
                   @requestQueue.shift()
