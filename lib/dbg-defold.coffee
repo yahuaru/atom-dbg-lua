@@ -3,8 +3,8 @@ path = require 'path'
 net = require 'net'
 {BufferedProcess, CompositeDisposable, Emitter} = require 'atom'
 
-escapePath = (path) ->
-  return (path.replace /\\/g, '/').replace /[\s\t\n]/g, '\\ '
+escapePath = (filepath) ->
+  return (filepath.replace /\\/g, '/').replace /[\s\t\n]/g, '\\ '
 
 commandStatus =
   requestAccepted: '200'
@@ -47,7 +47,7 @@ module.exports = DbgDefold =
   getFullStack: (stack) =>
     return new Promise (resolve, reject) ->
       output = ''
-      script = __dirname+'\\lua_stack.lua'
+      script = path.resolve __dirname, './lua_stack.lua'
       @process = new BufferedProcess
         command: 'lua'
         args: [script]
@@ -63,7 +63,7 @@ module.exports = DbgDefold =
           resolve result
 
       @process.process.stdin.write stack+'\r\n', binary: true
-      @process.process.stdin.write atom.project.getPaths()[0]+'\r\n', binary: true
+      @process.process.stdin.write escapePath(atom.project.getPaths()[0])+'\r\n', binary: true
 
 
   activate: (state) ->
@@ -132,7 +132,7 @@ module.exports = DbgDefold =
         for breakpoint in @breakpoints
           @addBreakpoint breakpoint
 
-        @sendCommand "basedir", [atom.project.getPaths()[0]]
+        @sendCommand "basedir", [escapePath atom.project.getPaths()[0]]
 
         @socket.on 'data' , (data) =>
           response = data.toString()
@@ -140,7 +140,7 @@ module.exports = DbgDefold =
           messages = response.split '\n'
           for message in messages
             if message == "" or message == null then continue
-            code = message.match(///^([0-9]+)///)[0]
+            code = message.match(///^[0-9]+///g)[0]
             if @logToConsole then console.log 'code:',code
             switch code
               when commandStatus.requestAccepted
@@ -155,14 +155,16 @@ module.exports = DbgDefold =
                       @ui.setStack(response)
                       Array::push.apply @variables, frame.variables for frame in response
                       @ui.setVariables(@variables)
-                      setFrame(frames.length - 1)
+                      @ui.setFrame(0)
+                      @ui.paused()
                     .catch (error) =>
                       console.error 'failed', error
-
               when commandStatus.badRequest
                 if @requestQueue.length > 0
                   @requestQueue.shift()
               when commandStatus.break
+                filepath = path.resolve escapePath(atom.project.getPaths()[0]), '.'+message.match(///((\/\w+)+\.\w+)///g)[0]
+                line = message.match(///[0-9]+$///g)[0]
                 @sendCommand 'stack'
 
 
@@ -245,16 +247,16 @@ module.exports = DbgDefold =
   addBreakpoint: (breakpoint) ->
     @breakpoints.push breakpoint
 
-    path = '/'+atom.project.relativizePath(breakpoint.path)[1]
-    @sendCommand 'setb', [(escapePath path), breakpoint.line]
+    filepath = '/'+escapePath(atom.project.relativizePath(breakpoint.path)[1])
+    @sendCommand 'setb', [filepath, breakpoint.line]
 
   removeBreakpoint: (breakpoint) ->
     for i,compare in @breakpoints
       if compare==breakpoint
         @breakpoints.splice i,1
 
-    path = '/'+atom.project.relativizePath(breakpoint.path)[1]
-    @sendCommand 'delb', [(escapePath path), breakpoint.line]
+    filepath = '/'+escapePath(atom.project.relativizePath(breakpoint.path)[1])
+    @sendCommand 'delb', [filepath, breakpoint.line]
 
 
   provideDbgProvider: ->
