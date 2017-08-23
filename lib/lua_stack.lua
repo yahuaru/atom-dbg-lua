@@ -68,7 +68,46 @@ function getStack(response)
 	end
 end
 
-local resp = lines_from('D:/log.txt')
+function dump(o)
+   if type(o) == 'table' then
+      local s = '{ '
+      for k,v in pairs(o) do
+         if type(k) ~= 'number' then k = '"'..k..'"' end
+         s = s .. '['..k..'] = ' .. dump(v) .. ','
+      end
+      return s .. '} '
+   else
+      return tostring(o)
+   end
+end
+
+function convert(o)
+	if type(o) == 'table' then
+		local s = {}
+    for k,v in pairs(o) do
+				s[#s+1] = {name = dump(k), value = tostring(v)}
+				if type(v) == 'table' then s[#s].childs = dump(v) end
+      end
+      return s
+   else
+      return tostring(o)
+   end
+end
+
+function serialize(obj, seen)
+  -- Handle non-tables and previously-seen tables.
+  if type(obj) ~= 'table' then return fixUTF8(serialize(obj, params)) end
+  if seen and seen[obj] then return seen[obj] end
+
+  -- New table; mark it as seen an copy recursively.
+  local s = seen or {}
+  local res = setmetatable({}, getmetatable(obj))
+  s[obj] = res
+  for k, v in pairs(obj) do res[serialize(k, s)] = serialize(v, s) end
+  return res
+end
+
+local resp = io.read('*a')
 local stack, _, err = getStack(resp)
 
 local stack_result = {}
@@ -82,7 +121,6 @@ for _,frame in ipairs(stack) do
   -- call = { source.name, source.source, source.linedefined,
   --   source.currentline, source.what, source.namewhat, source.short_src }
   local call = frame[1]
-
   -- format the function name to a readable user string
   local func_name = call[5] == "main" and "main chunk"
     or call[5] == "C" and (call[1] or "C function")
@@ -92,32 +130,35 @@ for _,frame in ipairs(stack) do
 -- create the new tree item for this level of the call stack
 --local callitem = stackCtrl:AppendItem(root, text, image.STACK)
 --print("CALL ITEM: " .. text)
-  local func = {}
-  func.name = func_name
-  func.line = call[4]
-  func.at_file = call[7]
-  func.at_line = call[3]
-  func.variables = {}
+  local frame_info = {}
+  frame_info.name = func_name
+  frame_info.file = call[2]
+  frame_info.line = call[3]
+  frame_info.variables = {}
   -- add the local variables to the call stack item
   for name,val in pairs(type(frame[2]) == "table" and frame[2] or {}) do
-    if name ~= 'dbg' then
-      local variable = {}
-      variable.name = name
-      variable.value = val[1]
-      func.variables[#func.variables + 1] = variable
-    end
+	    local variable = {}
+			variable['name'] = name
+			variable['type'] = type(val[1])
+			variable['value'] = tostring(val[1])
+			variable['local'] = true
+			variable['file'] = frame_info.file
+			variable['children'] = convert(val[1])
+	    frame_info.variables[#frame_info.variables + 1] = variable
   end
 
   -- add the upvalues for this call stack level to the tree item
   for name,val in pairs(type(frame[3]) == "table" and frame[3] or {}) do
-    if name ~= 'dbg' then
-      local variable = {}
-      variable.name = name
-      variable.value = val[1]
-      func.variables[#func.variables + 1] = variable
-    end
+		local variable = {}
+		variable['name'] = name
+		variable['type'] = type(val[1])
+		variable['value'] = tostring(val[1])
+		variable['local'] = true
+		variable['file'] = frame_info.file
+		variable['children'] = convert(val[1])
+		frame_info.variables[#frame_info.variables + 1] = variable
   end
-  stack_result[#stack_result + 1] = json.encode(func)
+  stack_result[#stack_result + 1] = json.encode(frame_info)
 end
 t = json.encode(stack_result):gsub("\\", "")
 t = t:gsub("\"{", "{")

@@ -149,17 +149,17 @@ module.exports = DbgDefold =
                     @ui.running()
                   when 'stack'
                     @getFullStack(message)
-                    .then (response) ->
+                    .then (response) =>
                       result_stack = []
                       for func in response
                         result_stack.push
-                          local: true
-                          file: func.at_file
-                          line: func.at_line
                           name: func.name
-                          path: func.at_file
-                          error: undefined
-                    .catch (error) ->
+                          local: true
+                          file: func.defined.file
+                          line: func.defined.line
+                      @ui.setStack(result_stack)
+                      @ui.setVariables()
+                    .catch (error) =>
                       console.error 'failed', error
 
               when commandStatus.badRequest
