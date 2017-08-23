@@ -63,6 +63,7 @@ module.exports = DbgDefold =
           resolve result
 
       @process.process.stdin.write stack+'\r\n', binary: true
+      @process.process.stdin.write atom.project.getPaths()[0]+'\r\n', binary: true
 
 
   activate: (state) ->

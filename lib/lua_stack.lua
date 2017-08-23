@@ -108,6 +108,8 @@ function serialize(obj, seen)
 end
 
 local resp = io.read('*l')
+local path = io.read('*l')
+path = string.gsub(path, '%\\', '%/')
 local stack, _, err = getStack(resp)
 
 local stack_result = {}
@@ -132,8 +134,9 @@ for _,frame in ipairs(stack) do
 --print("CALL ITEM: " .. text)
   local frame_info = {}
   frame_info.name = func_name
-  frame_info.file = call[2]
-  frame_info.line = call[3]
+  frame_info.file = path .. call[2]
+  frame_info.line = call[4]
+	frame_info.path = call[2]..':'..call[3]
   frame_info.variables = {}
   -- add the local variables to the call stack item
   for name,val in pairs(type(frame[2]) == "table" and frame[2] or {}) do
