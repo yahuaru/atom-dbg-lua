@@ -41,6 +41,8 @@ module.exports = DbgDefold =
   waitingResponse: false
   running: false
   process: null
+  variables: []
+  frames:[]
 
   getFullStack: (stack) =>
     return new Promise (resolve, reject) ->
@@ -81,10 +83,8 @@ module.exports = DbgDefold =
   cleanupFrame: ->
     @errorEncountered = null
     return new Promise (fulfill) =>
-      @sendCommand 'delallw'
-        .then =>
-          @variableObjects = {}
-          @variableRootObjects = {}
+      fulfill
+
 
   start: (options) ->
     @ui.paused()
@@ -150,15 +150,11 @@ module.exports = DbgDefold =
                   when 'stack'
                     @getFullStack(message)
                     .then (response) =>
-                      result_stack = []
-                      for func in response
-                        result_stack.push
-                          name: func.name
-                          local: true
-                          file: func.defined.file
-                          line: func.defined.line
-                      @ui.setStack(result_stack)
-                      @ui.setVariables()
+                      frames = response
+                      @ui.setStack(response)
+                      Array::push.apply @variables, frame.variables for frame in response
+                      @ui.setVariables(@variables)
+                      setFrame(frames.length - 1)
                     .catch (error) =>
                       console.error 'failed', error
 
@@ -194,6 +190,7 @@ module.exports = DbgDefold =
     @socket = null
     @waitingResponse = false
     @requestQueue = []
+    @variables = []
 
     if @interactiveSession
       @interactiveSession.discard()
@@ -208,16 +205,23 @@ module.exports = DbgDefold =
   pause: ->
     return
 
-  selectFrame: ->
-    return
+  selectFrame: (index) ->
+    @cleanupFrame
+    @ui.setFrame index
 
   getVariableChildren: (name) -> return new Promise (fulfill) =>
-    fulfill [
+    var_path = name.split '.'
+    vars = @variables
+    empty_variable = [
       name: ''
       type: ''
       value: ''
       expandable: false
     ]
+    for var_name in var_path
+        variable = (i for i in vars when i.name is var_name)[0]
+        vars = variable.children
+    fulfill if variable.children then variable.children else []
 
   stepIn: ->
     @cleanupFrame().then =>

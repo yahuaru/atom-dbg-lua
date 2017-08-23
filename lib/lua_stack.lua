@@ -107,7 +107,7 @@ function serialize(obj, seen)
   return res
 end
 
-local resp = io.read('*a')
+local resp = io.read('*l')
 local stack, _, err = getStack(resp)
 
 local stack_result = {}
@@ -143,7 +143,8 @@ for _,frame in ipairs(stack) do
 			variable['value'] = tostring(val[1])
 			variable['local'] = true
 			variable['file'] = frame_info.file
-			variable['children'] = convert(val[1])
+			variable['expandable'] = type(val[1]) == "table"
+			variable['children'] = type(val[1]) == "table" and convert(val[1]) or nil
 	    frame_info.variables[#frame_info.variables + 1] = variable
   end
 
@@ -155,7 +156,8 @@ for _,frame in ipairs(stack) do
 		variable['value'] = tostring(val[1])
 		variable['local'] = true
 		variable['file'] = frame_info.file
-		variable['children'] = convert(val[1])
+		variable['expandable'] = type(val[1]) == "table"
+		variable['children'] = type(val[1]) == "table" and convert(val[1]) or nil
 		frame_info.variables[#frame_info.variables + 1] = variable
   end
   stack_result[#stack_result + 1] = json.encode(frame_info)
