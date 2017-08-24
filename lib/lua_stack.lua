@@ -143,7 +143,7 @@ for _,frame in ipairs(stack) do
 	    local variable = {}
 			variable['name'] = name
 			variable['type'] = type(val[1])
-			variable['value'] = tostring(val[1])
+			variable['value'] = type(val[1]) ~= "table" and tostring(val[1]) or "table"
 			variable['local'] = true
 			variable['file'] = frame_info.file
 			variable['expandable'] = type(val[1]) == "table"
@@ -156,7 +156,7 @@ for _,frame in ipairs(stack) do
 		local variable = {}
 		variable['name'] = name
 		variable['type'] = type(val[1])
-		variable['value'] = tostring(val[1])
+		variable['value'] = type(val[1]) ~= "table" and tostring(val[1]) or "table"
 		variable['local'] = true
 		variable['file'] = frame_info.file
 		variable['expandable'] = type(val[1]) == "table"

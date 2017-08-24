@@ -83,8 +83,8 @@ module.exports = DbgDefold =
 
   cleanupFrame: ->
     @errorEncountered = null
-    return new Promise (fulfill) =>
-      fulfill
+    @frame = []
+    @variables = []
 
 
   start: (options) ->
@@ -151,14 +151,17 @@ module.exports = DbgDefold =
                   when 'stack'
                     @getFullStack(message)
                     .then (response) =>
+                      if @logToConsole then console.log 'stack json: ', response
                       frames = response
+                      frames = frames.reverse()
+                      frame.file = frame.file.replace /\//g, '\\' for frame in frames
                       @ui.setStack(response)
-                      Array::push.apply @variables, frame.variables for frame in response
+                      Array::push.apply @variables, frame.variables for frame in frames
                       @ui.setVariables(@variables)
-                      @ui.setFrame(0)
+                      @ui.setFrame(frames.length - 1)
                       @ui.paused()
                     .catch (error) =>
-                      console.error 'failed', error
+                      if @logToConsole then console.error 'failed', error
               when commandStatus.badRequest
                 if @requestQueue.length > 0
                   @requestQueue.shift()
@@ -171,6 +174,7 @@ module.exports = DbgDefold =
 
         @socket.on 'close', (data) =>
           if @logToConsole then console.log 'CLOSED:', socket.remoteAddress+':'+socket.remotePort
+          @ui.stop()
 
 
     @outputPanel.print 'Run the program you wish to debug'
@@ -227,16 +231,16 @@ module.exports = DbgDefold =
     fulfill if variable.children then variable.children else []
 
   stepIn: ->
-    @cleanupFrame().then =>
-      @sendCommand 'step'
+    @cleanupFrame()
+    @sendCommand 'step'
 
   stepOut: ->
-    @cleanupFrame().then =>
-      @sendCommand 'out'
+    @cleanupFrame()
+    @sendCommand 'out'
 
   stepOver: ->
-    @cleanupFrame().then =>
-      @sendCommand 'over'
+    @cleanupFrame()
+    @sendCommand 'over'
 
   sendCommand: (command, args = ['']) ->
     @requestQueue.push {command:command, args:args}
