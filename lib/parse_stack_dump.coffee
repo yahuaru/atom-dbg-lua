@@ -64,11 +64,8 @@ module.exports = (dump) ->
 
         var_stack = []
         recursive_check = (key, value) =>
-          var_stack.push key
           location = var_stack.join('.')
-          if variables[location]
-            var_stack.pop()
-            return
+          var_stack.push key
 
           if typeof(value[0]) == 'object'
             if Array.isArray(value[0])
@@ -78,7 +75,8 @@ module.exports = (dump) ->
               for _key, _value of value[0]
                 recursive_check(_key, _value)
 
-          variables[location] = create_variable(key,value)
+          variables[location] = if variables[location] then variables[location] else variables[location] = []
+          variables[location].push create_variable(key,value)
           var_stack.pop()
 
         recursive_check(key, value)

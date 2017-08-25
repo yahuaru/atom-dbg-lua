@@ -32,7 +32,6 @@ module.exports = DbgDefold =
   showOutputPanel: false
   unseenOutputPanelContent: false
   closedNaturally: false
-  miEmitter: null
   errorEncountered: null
   socket: null
   server: null
@@ -43,6 +42,7 @@ module.exports = DbgDefold =
   process: null
   variables: []
   frames:[]
+  emitter: new Emitter
 
   getFullStack: (stack) =>
     return new Promise (resolve, reject) ->
@@ -71,6 +71,7 @@ module.exports = DbgDefold =
 
     atom.config.observe 'dbg-defold.logToConsole', (set) =>
       @logToConsole = set
+
   consumeOutputPanel: (outputPanel) ->
     @outputPanel = outputPanel
 
@@ -79,11 +80,15 @@ module.exports = DbgDefold =
     @breakpoints = api.breakpoints
     @outputPanel?.clear()
 
+    @emitter.on 'stack', (stack) =>
+      @ui.setStack(stack)
+      @ui.setFrame(stack.length - 1)
+
     @start options
 
   cleanupFrame: ->
     @errorEncountered = null
-    @frame = []
+    @frames = []
     @variables = []
 
 
@@ -121,8 +126,6 @@ module.exports = DbgDefold =
           @outputPanel.show()
         @unseenOutputPanelContent = true
 
-    @miEmitter = new Emitter()
-
     #Server
     @server = net.createServer (socket) =>
         @outputPanel.print 'CONNECTED: '+socket.remoteAddress+':'+socket.remotePort
@@ -155,10 +158,10 @@ module.exports = DbgDefold =
                       frames = response
                       frames = frames.reverse()
                       frame.file = frame.file.replace /\//g, '\\' for frame in frames
-                      @ui.setStack(response)
-                      Array::push.apply @variables, frame.variables for frame in frames
+                      @stack = frames
+                      @emitter.emit 'stack', @stack
+                      @variables = frame.variables for frame in frames
                       @ui.setVariables(@variables)
-                      @ui.setFrame(frames.length - 1)
                       @ui.paused()
                     .catch (error) =>
                       if @logToConsole then console.error 'failed', error
@@ -186,6 +189,7 @@ module.exports = DbgDefold =
     @requestQueue = []
 
   stop: ->
+    @cleanupFrame()
     @errorEncountered = null
     @variableObjects = {}
     @variableRootObjects = {}
@@ -197,7 +201,6 @@ module.exports = DbgDefold =
     @socket = null
     @waitingResponse = false
     @requestQueue = []
-    @variables = []
 
     if @interactiveSession
       @interactiveSession.discard()
@@ -213,7 +216,7 @@ module.exports = DbgDefold =
     return
 
   selectFrame: (index) ->
-    @cleanupFrame
+    @cleanupFrame()
     @ui.setFrame index
 
   getVariableChildren: (name) -> return new Promise (fulfill) =>
@@ -269,16 +272,6 @@ module.exports = DbgDefold =
 
     canHandleOptions: (options) =>
       return new Promise(fulfill, reject) =>
-        @start options
-        .then =>
-          @stop()
-          fulfill true
-
-        .catch (error) =>
-          @stop()
-          if typeof error == 'string' && error.match /not in executable format/
-            fulfill false
-          else
             fulfill true
 
     debug: @debug.bind this
@@ -296,6 +289,8 @@ module.exports = DbgDefold =
 
     addBreakpoint: @addBreakpoint.bind this
     removeBreakpoint: @removeBreakpoint.bind this
+
+    emitter: @emitter
 
   consumeDbg: (dbg) ->
     @dbg = dbg
