@@ -132,8 +132,9 @@ module.exports = DbgDefold =
         if @logToConsole then console.log 'CONNECTED:', socket.remoteAddress+':'+socket.remotePort
         @socket = socket
 
-        for breakpoint in @breakpoints
-          @addBreakpoint breakpoint
+        breakpoints = @breakpoints
+        @breakpoints = []
+        @addBreakpoint breakpoint for breakpoint in breakpoints
 
         @sendCommand "basedir", [escapePath atom.project.getPaths()[0]]
 
@@ -201,6 +202,7 @@ module.exports = DbgDefold =
     @socket = null
     @waitingResponse = false
     @requestQueue = []
+    @breakpoints = []
 
     if @interactiveSession
       @interactiveSession.discard()
@@ -252,18 +254,18 @@ module.exports = DbgDefold =
     @socket.write command.toUpperCase()+' '+arg+'\n'
 
   addBreakpoint: (breakpoint) ->
+    if breakpoint in @breakpoints then return
     @breakpoints.push breakpoint
-
     filepath = '/'+escapePath(atom.project.relativizePath(breakpoint.path)[1])
     @sendCommand 'setb', [filepath, breakpoint.line]
+    @emitter.emit 'addBreakpoint', breakpoint
 
   removeBreakpoint: (breakpoint) ->
-    for i,compare in @breakpoints
-      if compare==breakpoint
-        @breakpoints.splice i,1
-
+    if breakpoint not in @breakpoints then return
+    @breakpoints.splice(@breakpoints.indexOf(breakpoint), 1)
     filepath = '/'+escapePath(atom.project.relativizePath(breakpoint.path)[1])
     @sendCommand 'delb', [filepath, breakpoint.line]
+    @emitter.emit 'removeBreakpoint', breakpoint
 
 
   provideDbgProvider: ->
