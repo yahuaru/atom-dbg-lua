@@ -44,7 +44,7 @@ local function fixUTF8(...)
   return unpack(t)
 end
 
-function getStack(response)
+local function getStack(response)
 -- tests the functions above
 
 	local _, _, status, res = string.find(response, "^(%d+)%s+%w+%s+(.+)%s*$")
@@ -68,51 +68,33 @@ function getStack(response)
 	end
 end
 
-function dump(o)
-   if type(o) == 'table' then
-      local s = '{ '
-      for k,v in pairs(o) do
-         if type(k) ~= 'number' then k = '"'..k..'"' end
-         s = s .. '['..k..'] = ' .. dump(v) .. ','
-      end
-      return s .. '} '
-   else
-      return tostring(o)
-   end
-end
 
-function convert(o)
-	if type(o) == 'table' then
-		local s = {}
-    for k,v in pairs(o) do
-				s[#s+1] = {name = dump(k), value = tostring(v)}
-				if type(v) == 'table' then s[#s].childs = dump(v) end
-      end
-      return s
-   else
-      return tostring(o)
-   end
-end
-
-function serialize(obj, seen)
-  -- Handle non-tables and previously-seen tables.
-  if type(obj) ~= 'table' then return fixUTF8(serialize(obj, params)) end
-  if seen and seen[obj] then return seen[obj] end
-
-  -- New table; mark it as seen an copy recursively.
-  local s = seen or {}
-  local res = setmetatable({}, getmetatable(obj))
-  s[obj] = res
-  for k, v in pairs(obj) do res[serialize(k, s)] = serialize(v, s) end
-  return res
+local function serialize_table(name, val, file, name_stack, variables)
+	local variable = {}
+	local location = table.concat(name_stack, ".")
+	variable['name'] = name
+	variable['type'] = type(val)
+	variable['value'] = type(val) ~= "table" and tostring(val) or "table"
+	variable['local'] = true
+	variable['file'] = file
+	variable['expandable'] = type(val) == "table"
+	variables[location] = variables[location] and variables[location] or {}
+	table.insert(variables[location], variable)
+	table.insert(name_stack, name)
+	for k,v in pairs(variable['expandable'] and val or {}) do
+	 serialize_table(k, v, file, name_stack, variables)
+ 	end
+	table.remove(name_stack)
 end
 
 local resp = io.read('*l')
 local path = io.read('*l')
 path = string.gsub(path, '%\\', '%/')
 local stack, _, err = getStack(resp)
+print(stack, err)
 
 local stack_result = {}
+local variables_result = {}
 
 for _,frame in ipairs(stack) do
   -- check if the stack includes expected structures
@@ -137,7 +119,8 @@ for _,frame in ipairs(stack) do
   frame_info.file = path .. call[2]
   frame_info.line = call[4]
 	frame_info.path = call[2]..':'..call[3]
-  frame_info.variables = {}
+  local variables = {}
+	variables[""] = {}
   -- add the local variables to the call stack item
   for name,val in pairs(type(frame[2]) == "table" and frame[2] or {}) do
 	    local variable = {}
@@ -147,10 +130,11 @@ for _,frame in ipairs(stack) do
 			variable['local'] = true
 			variable['file'] = frame_info.file
 			variable['expandable'] = type(val[1]) == "table"
-			variable['children'] = type(val[1]) == "table" and convert(val[1]) or nil
-	    frame_info.variables[#frame_info.variables + 1] = variable
+	    table.insert(variables[""], variable)
+			for k,v in pairs(variable['expandable'] and val[1] or {}) do
+			 serialize_table(k, v, frame_info.file, {name}, variables)
+		 	end
   end
-
   -- add the upvalues for this call stack level to the tree item
   for name,val in pairs(type(frame[3]) == "table" and frame[3] or {}) do
 		local variable = {}
@@ -160,12 +144,16 @@ for _,frame in ipairs(stack) do
 		variable['local'] = true
 		variable['file'] = frame_info.file
 		variable['expandable'] = type(val[1]) == "table"
-		variable['children'] = type(val[1]) == "table" and convert(val[1]) or nil
-		frame_info.variables[#frame_info.variables + 1] = variable
+		table.insert(variables[""], variable)
+		for k,v in pairs(variable['expandable'] and val[1] or {}) do
+		 serialize_table(k, v, frame_info.file, {name}, variables)
+		end
   end
-  stack_result[#stack_result + 1] = json.encode(frame_info)
+  table.insert(stack_result, frame_info)
+	table.insert(variables_result, variables)
 end
-t = json.encode(stack_result):gsub("\\", "")
+t = json.encode({stack = stack_result, variables = variables_result})
+t = t:gsub("\\", "")
 t = t:gsub("\"{", "{")
 t = t:gsub("}\"", "}")
 print(t)

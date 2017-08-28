@@ -1,18 +1,9 @@
+MobDebug = require './mobdebug'
 fs = require 'fs'
 path = require 'path'
 net = require 'net'
 {BufferedProcess, CompositeDisposable, Emitter} = require 'atom'
 
-escapePath = (filepath) ->
-  return (filepath.replace /\\/g, '/').replace /[\s\t\n]/g, '\\ '
-
-commandStatus =
-  requestAccepted: '200'
-  badRequest: '400'
-  errorInExecution: '401'
-  break: '202'
-  watch: '203'
-  output: '204'
 
 module.exports = DbgDefold =
   config:
@@ -24,47 +15,15 @@ module.exports = DbgDefold =
   logToConsole: true
   dbg: null
   modalPanel: null
-  subscriptions: null
   outputPanel: null
-  breakpoints: []
   ui: null
   interactiveSession: null
   showOutputPanel: false
   unseenOutputPanelContent: false
   closedNaturally: false
-  errorEncountered: null
-  socket: null
-  server: null
-  variableRootObjects: {}
-  requestQueue: []
-  waitingResponse: false
   running: false
-  process: null
-  variables: []
-  frames:[]
-  emitter: new Emitter
-
-  getFullStack: (stack) =>
-    return new Promise (resolve, reject) ->
-      output = ''
-      script = path.resolve __dirname, './lua_stack.lua'
-      @process = new BufferedProcess
-        command: 'lua'
-        args: [script]
-        options:
-          cwd: atom.project.getPaths()[0]
-        stdout: (data) =>
-          output += data
-        stderr: (data) =>
-          output += data
-          reject output
-        exit: (data) =>
-          result = JSON.parse output
-          resolve result
-
-      @process.process.stdin.write stack+'\r\n', binary: true
-      @process.process.stdin.write escapePath(atom.project.getPaths()[0])+'\r\n', binary: true
-
+  breakpoints: []
+  mdbg: new MobDebug()
 
   activate: (state) ->
     #require('atom-package-deps').install('dbg-defold')
@@ -80,9 +39,12 @@ module.exports = DbgDefold =
     @breakpoints = api.breakpoints
     @outputPanel?.clear()
 
-    @emitter.on 'stack', (stack) =>
-      @ui.setStack(stack)
-      @ui.setFrame(stack.length - 1)
+    @mdbg.emitter.on @mdbg.debugEvents.startedListen, (socket) =>
+      @mdbg.addBreakpoint breakpoint for breakpoint in @breakpoints
+    @mdbg.emitter.on @mdbg.debugEvents.requestAccepted, ({request, response}) =>
+      switch request.command
+        when @mdbg.commands.continue
+          @ui.running()
 
     @start options
 
@@ -96,21 +58,11 @@ module.exports = DbgDefold =
     @ui.paused()
     @showOutputPanel = true
     @unseenOutputPanelContent = false
-    @closedNaturally = false
     @outputPanel?.clear()
-
-    matchAsyncHeader = /^([\^=*+])(.+?)(?:,(.*))?$/
-
-    handleError = (message) =>
-      atom.notifications.addError 'Error running Defold Debugger',
-        description: message
-        dismissable: true
-      @ui.stop()
 
     if @outputPanel and @outputPanel.getInteractiveSession
       interactiveSession = @outputPanel.getInteractiveSession()
-      if interactiveSession.pty
-        @interactiveSession = interactiveSession
+      if interactiveSession.pty then @interactiveSession = interactiveSession
 
     if @interactiveSession
       @interactiveSession.pty.on 'data', (data) =>
@@ -119,89 +71,12 @@ module.exports = DbgDefold =
           @outputPanel.show()
         @unseenOutputPanelContent = true
 
-    if @interactiveSession
-      @interactiveSession.pty.on 'data', (data) =>
-        if @showOutputPanelNext
-          @showOutputPanelNext = false
-          @outputPanel.show()
-        @unseenOutputPanelContent = true
-
-    #Server
-    @server = net.createServer (socket) =>
-        @outputPanel.print 'CONNECTED: '+socket.remoteAddress+':'+socket.remotePort
-        if @logToConsole then console.log 'CONNECTED:', socket.remoteAddress+':'+socket.remotePort
-        @socket = socket
-
-        breakpoints = @breakpoints
-        @breakpoints = []
-        @addBreakpoint breakpoint for breakpoint in breakpoints
-
-        @sendCommand "basedir", [escapePath atom.project.getPaths()[0]]
-
-        @socket.on 'data' , (data) =>
-          response = data.toString()
-          if @logToConsole then console.log 'DATA', socket.remoteAddress+':'+socket.remotePort, response
-          messages = response.split '\n'
-          for message in messages
-            if message == "" or message == null then continue
-            code = message.match(///^[0-9]+///g)[0]
-            if @logToConsole then console.log 'code:',code
-            switch code
-              when commandStatus.requestAccepted
-                request = @requestQueue.shift()
-                switch request.command
-                  when 'run'
-                    @ui.running()
-                  when 'stack'
-                    @getFullStack(message)
-                    .then (response) =>
-                      if @logToConsole then console.log 'stack json: ', response
-                      frames = response
-                      frames = frames.reverse()
-                      frame.file = frame.file.replace /\//g, '\\' for frame in frames
-                      @stack = frames
-                      @emitter.emit 'stack', @stack
-                      @variables = frame.variables for frame in frames
-                      @ui.setVariables(@variables)
-                      @ui.paused()
-                    .catch (error) =>
-                      if @logToConsole then console.error 'failed', error
-              when commandStatus.badRequest
-                if @requestQueue.length > 0
-                  @requestQueue.shift()
-              when commandStatus.break
-                filepath = path.resolve escapePath(atom.project.getPaths()[0]), '.'+message.match(///((\/\w+)+\.\w+)///g)[0]
-                line = message.match(///[0-9]+$///g)[0]
-                @sendCommand 'stack'
-
-
-
-        @socket.on 'close', (data) =>
-          if @logToConsole then console.log 'CLOSED:', socket.remoteAddress+':'+socket.remotePort
-          @ui.stop()
-
-
-    @outputPanel.print 'Run the program you wish to debug'
-    @server.listen(8172, 'localhost');
-
-    #Server end
-
-    @waitingResponse = false
-    @requestQueue = []
+    @mdbg.start(options)
 
   stop: ->
+    @mdbg.stop()
     @cleanupFrame()
-    @errorEncountered = null
-    @variableObjects = {}
-    @variableRootObjects = {}
 
-    @socket?.end()
-    @socket?.destroy()
-    @server?.close()
-    @server = null
-    @socket = null
-    @waitingResponse = false
-    @requestQueue = []
     @breakpoints = []
 
     if @interactiveSession
@@ -212,10 +87,10 @@ module.exports = DbgDefold =
       @outputPanel?.hide()
 
   continue: ->
-    @sendCommand 'run'
+    @mdbg.sendCommand @mdbg.commands.continue
 
   pause: ->
-    return
+    @mdbg.sendCommand @mdbg.commands.pause
 
   selectFrame: (index) ->
     @cleanupFrame()
@@ -237,21 +112,12 @@ module.exports = DbgDefold =
 
   stepIn: ->
     @cleanupFrame()
-    @sendCommand 'step'
 
   stepOut: ->
     @cleanupFrame()
-    @sendCommand 'out'
 
   stepOver: ->
     @cleanupFrame()
-    @sendCommand 'over'
-
-  sendCommand: (command, args = ['']) ->
-    @requestQueue.push {command:command, args:args}
-    arg = args.join ' '
-    if @logToConsole then console.log 'dbg-defold > ',command,' ', arg
-    @socket.write command.toUpperCase()+' '+arg+'\n'
 
   addBreakpoint: (breakpoint) ->
     if breakpoint in @breakpoints then return
@@ -291,8 +157,6 @@ module.exports = DbgDefold =
 
     addBreakpoint: @addBreakpoint.bind this
     removeBreakpoint: @removeBreakpoint.bind this
-
-    emitter: @emitter
 
   consumeDbg: (dbg) ->
     @dbg = dbg
