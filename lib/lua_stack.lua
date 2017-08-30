@@ -87,11 +87,10 @@ local function serialize_table(name, val, file, name_stack, variables)
 	table.remove(name_stack)
 end
 
-local resp = io.read('*l')
+local dump = io.read('*l')
 local path = io.read('*l')
 path = string.gsub(path, '%\\', '%/')
-local stack, _, err = getStack(resp)
-print(stack, err)
+local stack, _, err = getStack(dump)
 
 local stack_result = {}
 local variables_result = {}
@@ -116,11 +115,10 @@ for _,frame in ipairs(stack) do
 --print("CALL ITEM: " .. text)
   local frame_info = {}
   frame_info.name = func_name
-  frame_info.file = path .. call[2]
+  frame_info.file = path .. '/' .. call[2]
   frame_info.line = call[4]
 	frame_info.path = call[2]..':'..call[3]
   local variables = {}
-	variables[""] = {}
   -- add the local variables to the call stack item
   for name,val in pairs(type(frame[2]) == "table" and frame[2] or {}) do
 	    local variable = {}
@@ -130,10 +128,7 @@ for _,frame in ipairs(stack) do
 			variable['local'] = true
 			variable['file'] = frame_info.file
 			variable['expandable'] = type(val[1]) == "table"
-	    table.insert(variables[""], variable)
-			for k,v in pairs(variable['expandable'] and val[1] or {}) do
-			 serialize_table(k, v, frame_info.file, {name}, variables)
-		 	end
+	    table.insert(variables, variable)
   end
   -- add the upvalues for this call stack level to the tree item
   for name,val in pairs(type(frame[3]) == "table" and frame[3] or {}) do
@@ -144,10 +139,7 @@ for _,frame in ipairs(stack) do
 		variable['local'] = true
 		variable['file'] = frame_info.file
 		variable['expandable'] = type(val[1]) == "table"
-		table.insert(variables[""], variable)
-		for k,v in pairs(variable['expandable'] and val[1] or {}) do
-		 serialize_table(k, v, frame_info.file, {name}, variables)
-		end
+		table.insert(variables, variable)
   end
   table.insert(stack_result, frame_info)
 	table.insert(variables_result, variables)

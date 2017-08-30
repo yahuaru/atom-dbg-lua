@@ -16,9 +16,9 @@ class MobDebug
 
   commands:
     continue: 'run'
-    step: 'step'
-    out: 'out'
-    over: 'over'
+    stepIn: 'step'
+    stepOut: 'out'
+    stepOver: 'over'
     pause: 'suspend'
     exit: 'exit'
     done: 'done'
@@ -74,14 +74,17 @@ class MobDebug
       switch code
         when @responseStatus.requestAccepted
           request = @requestQueue.shift()
-          if request.command == @commands.run then running = true
+          switch request.command
+            when @commands.run then @running = true
+            when @commands.pause then @running = false
+            when @commands.getStack then @parseStack response
           @emitter.emit 'requestAccepted', {request:request, response:response}
         when @responseStatus.badRequest
           if @requestQueue.length > 0
             @requestQueue.shift()
         when @responseStatus.break
           running = false
-          filepath = path.resolve @escapePath(atom.project.getPaths()[0]), '.'+message.match(///((\/\w+)+\.\w+)///g)[0]
+          filepath = path.resolve atom.project.getPaths()[0], '.'+message.split(' ')[2]
           line = message.match(///[0-9]+$///g)[0]
           @emitter.emit @debugEvents.pausedAtBreakpoint, {path: filepath, line: line}
 
@@ -91,8 +94,8 @@ class MobDebug
     @socket?.destroy()
     @server?.close()
 
-  getStack: (dump) =>
-    new Promise (resolve, reject) ->
+  parseStack: (dump) ->
+    new Promise (resolve, reject) =>
       output = ''
       script = path.resolve __dirname, './lua_stack.lua'
       @process = new BufferedProcess
@@ -104,28 +107,25 @@ class MobDebug
           output += data
         stderr: (data) =>
           output += data
+          @emitter.emit @debugEvents.error, error
           reject output
         exit: (data) =>
           result = JSON.parse output
+          @emitter.emit @debugEvents.receivedStack, result
           resolve result
-    .then (result) ->
-      @emitter.emit @debugEvents.receivedStack, result
-    .catch (error) ->
-      @emitter.emit @debugEvents.error, error
+      @process.process.stdin.write dump+@escapePath(atom.project.getPaths()[0])+'\r\n', binary: true
 
 
-      @process.process.stdin.write dump+'\r\n', binary: true
-      @process.process.stdin.write @escapePath(atom.project.getPaths()[0])+'\r\n', binary: true
 
   sendCommand: (command, args = [''], waitResponse = true) ->
-    if !@socket then return
-
+    if !@socket or @socket.destroyed then return
+    console.log command, args.join(" ")
     if waitResponse then @requestQueue.push {command:command, args:args}
     arg = args.join ' '
     @socket.write command.toUpperCase()+' '+arg+'\n'
 
   addBreakpoint: (breakpoint) ->
-    filepath = '/'+@escapePath(atom.project.relativizePath(breakpoint.path)[1])
+    filepath = @escapePath(atom.project.relativizePath(breakpoint.path)[1])
     if @running
       @sendCommand @commands.setBreakpointAsync, [filepath, breakpoint.line], false
     else
@@ -140,4 +140,13 @@ class MobDebug
       @sendCommand @commands.removeBreakpointSync, [filepath, breakpoint.line], true
 
   getStack: () ->
-    if not running then @sendCommand @commands.getStack
+    if not @running then @sendCommand @commands.getStack
+
+  stepIn: ->
+    if not @running then @sendCommand @mdbg.commands.stepIn
+
+  stepOut: ->
+    if not @running then @sendCommand @mdbg.commands.stepOut
+
+  stepOver: ->
+    if not @running then @sendCommand @mdbg.commands.stepOver
