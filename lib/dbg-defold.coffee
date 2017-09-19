@@ -41,7 +41,11 @@ module.exports = DbgDefold =
     @outputPanel?.clear()
 
     @mdbg.emitter.on @mdbg.debugEvents.startedListen, (socket) =>
-      @mdbg.addBreakpoint breakpoint for breakpoint in @breakpoints
+      for breakpoint in @breakpoints
+        for folderPath in atom.project.getDirectories()
+          if breakpoint.path.match folderPath
+            @mdbg.addBreakpoint breakpoint
+            break
     @mdbg.emitter.on @mdbg.debugEvents.requestAccepted, ({request, response}) =>
       switch request.command
         when @mdbg.commands.continue

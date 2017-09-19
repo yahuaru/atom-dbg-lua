@@ -125,7 +125,9 @@ class MobDebug
     @socket.write command.toUpperCase()+' '+arg+'\n'
 
   addBreakpoint: (breakpoint) ->
-    filepath = @escapePath(atom.project.relativizePath(breakpoint.path)[1])
+    filepath = atom.project.relativizePath(breakpoint.path)[1]
+    if "#{filepath}" is "#{breakpoint.path}" then return
+    filepath =  @escapePath(filepath)
     if @running
       @sendCommand @commands.setBreakpointAsync, [filepath, breakpoint.line], false
     else
