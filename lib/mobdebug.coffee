@@ -32,6 +32,7 @@ class MobDebug
     removeWatchExpression: 'delw'
 
   debugEvents:
+    requestAccepted: 'requestAccepted'
     pausedAtBreakpoint: 'break'
     receivedStack: 'stack'
     startedListen: 'listen'
@@ -75,10 +76,10 @@ class MobDebug
         when @responseStatus.requestAccepted
           request = @requestQueue.shift()
           switch request.command
-            when @commands.run then @running = true
+            when @commands.continue then @running = true
             when @commands.pause then @running = false
             when @commands.getStack then @parseStack response
-          @emitter.emit 'requestAccepted', {request:request, response:response}
+          @emitter.emit @debugEvents.requestAccepted, {request:request, response:response}
         when @responseStatus.badRequest
           if @requestQueue.length > 0
             @requestQueue.shift()
@@ -93,6 +94,10 @@ class MobDebug
     @socket?.end()
     @socket?.destroy()
     @server?.close()
+    @emitter = new Emitter()
+    @requestQueue = []
+    @running = false
+
 
   parseStack: (dump) ->
     new Promise (resolve, reject) =>
