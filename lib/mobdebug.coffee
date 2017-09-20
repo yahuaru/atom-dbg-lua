@@ -118,7 +118,7 @@ class MobDebug
 
 
   sendCommand: (command, args = [''], waitResponse = true) ->
-    if !@socket or @socket.destroyed then return
+    if not @socket? or @socket.destroyed then return
     console.log command, args.join(" ")
     if waitResponse then @requestQueue.push {command:command, args:args}
     arg = args.join ' '

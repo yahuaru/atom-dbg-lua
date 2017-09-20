@@ -21,7 +21,7 @@ module.exports = DbgDefold =
   showOutputPanel: false
   unseenOutputPanelContent: false
   closedNaturally: false
-  running: false
+  connected: false
   breakpoints: []
   mdbg: new MobDebug()
   variables: []
@@ -41,24 +41,29 @@ module.exports = DbgDefold =
     @outputPanel?.clear()
 
     @mdbg.emitter.on @mdbg.debugEvents.startedListen, (socket) =>
-      for breakpoint in @breakpoints
-        for folderPath in atom.project.getDirectories()
-          if breakpoint.path.match folderPath
-            @mdbg.addBreakpoint breakpoint
-            break
+      @outputPanel.print "Connected to #{socket.remoteAddress}:#{socket.remotePort}" if @outputPanel?
+      dirs = atom.project.getDirectories()
+      breakpoints = @breakpoints.filter((b) => dirs.filter((p) => b.path.match p)?)
+      @mdbg.addBreakpoint breakpoint for breakpoint in breakpoints
+
     @mdbg.emitter.on @mdbg.debugEvents.requestAccepted, ({request, response}) =>
       switch request.command
         when @mdbg.commands.continue
           @ui.running()
+
     @mdbg.emitter.on @mdbg.debugEvents.pausedAtBreakpoint, (breakpoint) =>
+      @running = false
       @ui.paused()
       @mdbg.getStack()
+
     @mdbg.emitter.on @mdbg.debugEvents.receivedStack, ({stack, variables}) =>
+      stack.reverse()
       @variables = variables
       frame.file = frame.file.replace /\//g, '\\' for frame in stack
       @ui.setStack stack
       @ui.setVariables @variables[@variables.length-1]
       @ui.setFrame stack.length-1
+
     @mdbg.emitter.on @mdbg.debugEvents.error, (error) =>
       console.error error
 
@@ -86,11 +91,15 @@ module.exports = DbgDefold =
 
     @mdbg.start(options)
 
+    @outputPanel.print "Run programm that need to debug" if @outputPanel?
+
   stop: ->
     @mdbg.stop()
     @cleanupFrame()
 
     @breakpoints = []
+    @connected = false
+    @running = false
 
     if @interactiveSession
       @interactiveSession.discard()
