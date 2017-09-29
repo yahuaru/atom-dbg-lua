@@ -46,6 +46,10 @@ module.exports = DbgDefold =
       breakpoints = @breakpoints.filter((b) => dirs.filter((p) => b.path.match p)?)
       @mdbg.addBreakpoint breakpoint for breakpoint in breakpoints
 
+    @mdbg.emitter.on @mdbg.debugEvents.connectionClosed, (socket) =>
+      @ui.stop()
+      @stop()
+
     @mdbg.emitter.on @mdbg.debugEvents.requestAccepted, ({request, response}) =>
       switch request.command
         when @mdbg.commands.continue

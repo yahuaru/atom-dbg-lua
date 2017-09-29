@@ -121,7 +121,6 @@ class MobDebug
       @process.process.stdin.write dump+@escapePath(atom.project.getPaths()[0])+'\r\n', binary: true
 
 
-
   sendCommand: (command, args = [''], waitResponse = true) ->
     if not @socket? or @socket.destroyed then return
     console.log command, args.join(" ")
@@ -133,6 +132,7 @@ class MobDebug
     filepath = atom.project.relativizePath(breakpoint.path)[1]
     if "#{filepath}" is "#{breakpoint.path}" then return
     filepath =  @escapePath(filepath)
+    console.log filepath
     if @running
       @sendCommand @commands.setBreakpointAsync, [filepath, breakpoint.line], false
     else

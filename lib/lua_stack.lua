@@ -115,9 +115,9 @@ for _,frame in ipairs(stack) do
 --print("CALL ITEM: " .. text)
   local frame_info = {}
   frame_info.name = func_name
-  frame_info.file = path .. '/' .. call[2]
+  frame_info.file = path .. call[2]
   frame_info.line = call[4]
-	frame_info.path = call[2]..':'..call[3]
+	frame_info.path = call[2]
   local variables = {}
   -- add the local variables to the call stack item
   for name,val in pairs(type(frame[2]) == "table" and frame[2] or {}) do
