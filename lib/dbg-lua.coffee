@@ -27,7 +27,7 @@ module.exports = DbgLua =
   variables: []
 
   activate: (state) ->
-    require('atom-package-deps').install('dbg-lua')
+    #require('atom-package-deps').install('dbg-lua')
 
     atom.config.observe 'dbg-lua.logToConsole', (set) =>
       @logToConsole = set
