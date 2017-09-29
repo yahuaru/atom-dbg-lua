@@ -21,9 +21,10 @@ module.exports = DbgDefold =
   showOutputPanel: false
   unseenOutputPanelContent: false
   closedNaturally: false
-  running: false
+  connected: false
   breakpoints: []
   mdbg: new MobDebug()
+  variables: []
 
   activate: (state) ->
     #require('atom-package-deps').install('dbg-defold')
@@ -40,19 +41,39 @@ module.exports = DbgDefold =
     @outputPanel?.clear()
 
     @mdbg.emitter.on @mdbg.debugEvents.startedListen, (socket) =>
-      @mdbg.addBreakpoint breakpoint for breakpoint in @breakpoints
+      @outputPanel.print "Connected to #{socket.remoteAddress}:#{socket.remotePort}" if @outputPanel?
+      dirs = atom.project.getDirectories()
+      breakpoints = @breakpoints.filter((b) => dirs.filter((p) => b.path.match p)?)
+      @addBreakpoint breakpoint for breakpoint in breakpoints
+
+    @mdbg.emitter.on @mdbg.debugEvents.connectionClosed, (socket) =>
+      @ui.stop()
+      @stop()
+
     @mdbg.emitter.on @mdbg.debugEvents.requestAccepted, ({request, response}) =>
       switch request.command
         when @mdbg.commands.continue
           @ui.running()
 
+    @mdbg.emitter.on @mdbg.debugEvents.pausedAtBreakpoint, (breakpoint) =>
+      @ui.paused()
+      @mdbg.getStack()
+
+    @mdbg.emitter.on @mdbg.debugEvents.receivedStack, ({stack, variables}) =>
+      stack.reverse()
+      @variables = variables
+      frame.file = frame.file.replace /\//g, '\\' for frame in stack
+      @ui.setStack stack
+      @ui.setVariables @variables[@variables.length-1]
+      @ui.setFrame stack.length-1
+
+    @mdbg.emitter.on @mdbg.debugEvents.error, (error) =>
+      console.error error
+
     @start options
 
   cleanupFrame: ->
     @errorEncountered = null
-    @frames = []
-    @variables = []
-
 
   start: (options) ->
     @ui.paused()
@@ -73,11 +94,15 @@ module.exports = DbgDefold =
 
     @mdbg.start(options)
 
+    @outputPanel.print "Run programm that need to debug" if @outputPanel?
+
   stop: ->
     @mdbg.stop()
     @cleanupFrame()
 
     @breakpoints = []
+    @connected = false
+    @running = false
 
     if @interactiveSession
       @interactiveSession.discard()
@@ -93,50 +118,39 @@ module.exports = DbgDefold =
     @mdbg.sendCommand @mdbg.commands.pause
 
   selectFrame: (index) ->
-    @cleanupFrame()
     @ui.setFrame index
+    @ui.setVariables @variables[index]
 
-  getVariableChildren: (name) -> return new Promise (fulfill) =>
-    var_path = name.split '.'
-    vars = @variables
-    empty_variable = [
-      name: ''
-      type: ''
-      value: ''
-      expandable: false
-    ]
-    for var_name in var_path
-        variable = (i for i in vars when i.name is var_name)[0]
-        vars = variable.children
-    fulfill if variable.children then variable.children else []
+  getVariableChildren: (name) ->
+    return new Promise (fulfill) =>
+      empty_variable = [
+        name: ''
+        type: ''
+        value: ''
+        expandable: false
+      ]
+      fulfill [empty_variable]
 
   stepIn: ->
-    @cleanupFrame()
+    @mdbg.sendCommand @mdbg.commands.stepIn
 
   stepOut: ->
-    @cleanupFrame()
+    @mdbg.sendCommand @mdbg.commands.stepOut
 
   stepOver: ->
-    @cleanupFrame()
+    @mdbg.sendCommand @mdbg.commands.stepOver
 
   addBreakpoint: (breakpoint) ->
-    if breakpoint in @breakpoints then return
-    @breakpoints.push breakpoint
-    filepath = '/'+escapePath(atom.project.relativizePath(breakpoint.path)[1])
-    @sendCommand 'setb', [filepath, breakpoint.line]
-    @emitter.emit 'addBreakpoint', breakpoint
+    filepath = '/'+atom.project.relativizePath(breakpoint.path)[1]
+    @mdbg.addBreakpoint {path:filepath, line:breakpoint.line}
 
   removeBreakpoint: (breakpoint) ->
-    if breakpoint not in @breakpoints then return
-    @breakpoints.splice(@breakpoints.indexOf(breakpoint), 1)
-    filepath = '/'+escapePath(atom.project.relativizePath(breakpoint.path)[1])
-    @sendCommand 'delb', [filepath, breakpoint.line]
-    @emitter.emit 'removeBreakpoint', breakpoint
-
+    filepath = '/'+atom.project.relativizePath(breakpoint.path)[1]
+    @mdbg.removeBreakpoint {path:filepath, line:breakpoint.line}
 
   provideDbgProvider: ->
     name: 'dbg-defold'
-    description: "Defold debugger"
+    description: "Lua debugger"
 
     canHandleOptions: (options) =>
       return new Promise(fulfill, reject) =>
