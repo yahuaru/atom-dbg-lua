@@ -5,11 +5,11 @@ net = require 'net'
 {BufferedProcess, CompositeDisposable, Emitter} = require 'atom'
 
 
-module.exports = DbgDefold =
+module.exports = DbgLua =
   config:
     logToConsole:
       title: 'Log to developer console'
-      description: 'For debugging Defold problems'
+      description: 'For debugging Lua problems'
       type: 'boolean'
       default: true
   logToConsole: true
@@ -27,9 +27,9 @@ module.exports = DbgDefold =
   variables: []
 
   activate: (state) ->
-    #require('atom-package-deps').install('dbg-defold')
+    require('atom-package-deps').install('dbg-lua')
 
-    atom.config.observe 'dbg-defold.logToConsole', (set) =>
+    atom.config.observe 'dbg-lua.logToConsole', (set) =>
       @logToConsole = set
 
   consumeOutputPanel: (outputPanel) ->
@@ -149,7 +149,7 @@ module.exports = DbgDefold =
     @mdbg.removeBreakpoint {path:filepath, line:breakpoint.line}
 
   provideDbgProvider: ->
-    name: 'dbg-defold'
+    name: 'dbg-lua'
     description: "Lua debugger"
 
     canHandleOptions: (options) =>

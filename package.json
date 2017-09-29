@@ -1,13 +1,13 @@
 {
-  "name": "dbg-defold",
-  "main": "./lib/dbg-defold",
+  "name": "dbg-lua",
+  "main": "./lib/dbg-lua",
   "version": "0.1.0",
-  "description": "An interactive Defold debugger for Atom",
+  "description": "An interactive Lua debugger for Atom",
   "keywords": [
     "debug",
     "debugger"
   ],
-  "repository": "https://github.com/yahuaru/atom-dbg-defold",
+  "repository": "https://github.com/yahuaru/atom-dbg-lua",
   "license": "MIT",
   "engines": {
     "atom": ">=1.0.0 <2.0.0"
@@ -23,7 +23,7 @@
   },
   "providedServices": {
     "dbgProvider": {
-      "description": "Provides a dbg defold debugger",
+      "description": "Provides a dbg lua debugger",
       "versions": {
         "1.1.0": "provideDbgProvider"
       }
