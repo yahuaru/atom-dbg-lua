@@ -24,10 +24,8 @@ class MobDebug
     done: 'done'
     getStack: 'stack'
     setBaseDirectory: 'basedir'
-    setBreakpointSync: 'setb'
-    setBreakpointAsync: 'asetb'
-    removeBreakpointSync: 'delb'
-    removeBreakpointAsync: 'adelb'
+    setBreakpoint: 'setb'
+    removeBreakpoint: 'delb'
     addWatchExpression: 'setw'
     removeWatchExpression: 'delw'
 
@@ -128,21 +126,12 @@ class MobDebug
     arg = args.join ' '
     @socket.write command.toUpperCase()+' '+arg+'\n'
 
-  addBreakpoint: (breakpoint) ->
-    filepath = '/'+@escapePath(atom.project.relativizePath(breakpoint.path)[1])
-    console.log filepath
-    if @running
-      @sendCommand @commands.setBreakpointAsync, [filepath, breakpoint.line], false
-    else
-      @sendCommand @commands.setBreakpointSync, [filepath, breakpoint.line], true
+  addBreakpoint: ({path, line}) ->
+      @sendCommand @commands.setBreakpoint, [@escapePath(path), line], not @running
 
 
-  removeBreakpoint: (breakpoint) ->
-    filepath = '/'+@escapePath(atom.project.relativizePath(breakpoint.path)[1])
-    if @running
-      @sendCommand @commands.removeBreakpointAsync, [filepath, breakpoint.line], false
-    else
-      @sendCommand @commands.removeBreakpointSync, [filepath, breakpoint.line], true
+  removeBreakpoint: ({path, line}) ->
+      @sendCommand @commands.removeBreakpoint, [@escapePath(path), line], not @running
 
   getStack: () ->
     if not @running then @sendCommand @commands.getStack

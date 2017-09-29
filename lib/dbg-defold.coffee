@@ -44,7 +44,7 @@ module.exports = DbgDefold =
       @outputPanel.print "Connected to #{socket.remoteAddress}:#{socket.remotePort}" if @outputPanel?
       dirs = atom.project.getDirectories()
       breakpoints = @breakpoints.filter((b) => dirs.filter((p) => b.path.match p)?)
-      @mdbg.addBreakpoint breakpoint for breakpoint in breakpoints
+      @addBreakpoint breakpoint for breakpoint in breakpoints
 
     @mdbg.emitter.on @mdbg.debugEvents.connectionClosed, (socket) =>
       @ui.stop()
@@ -141,10 +141,12 @@ module.exports = DbgDefold =
     @mdbg.sendCommand @mdbg.commands.stepOver
 
   addBreakpoint: (breakpoint) ->
-    @mdbg.addBreakpoint breakpoint
+    filepath = '/'+atom.project.relativizePath(breakpoint.path)[1]
+    @mdbg.addBreakpoint {path:filepath, line:breakpoint.line}
 
   removeBreakpoint: (breakpoint) ->
-    @mdbg.removeBreakpoint breakpoint
+    filepath = '/'+atom.project.relativizePath(breakpoint.path)[1]
+    @mdbg.removeBreakpoint {path:filepath, line:breakpoint.line}
 
   provideDbgProvider: ->
     name: 'dbg-defold'
