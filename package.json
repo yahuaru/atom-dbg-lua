@@ -5,12 +5,10 @@
   "description": "An interactive Lua debugger for Atom",
   "keywords": [
     "debug",
-    "debugger"
+    "debugger",
+    "lua"
   ],
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/yahuaru/atom-dbg-lua.git"
-  },
+  "repository": "https://github.com/yahuaru/atom-dbg-lua",
   "license": "MIT",
   "engines": {
     "atom": ">=1.0.0 <2.0.0"
@@ -18,7 +16,6 @@
   "package-deps": [
     "dbg",
     "output-panel",
-    "Defold",
     "lua"
   ],
   "dependencies": {
