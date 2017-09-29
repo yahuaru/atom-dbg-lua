@@ -56,7 +56,6 @@ module.exports = DbgDefold =
           @ui.running()
 
     @mdbg.emitter.on @mdbg.debugEvents.pausedAtBreakpoint, (breakpoint) =>
-      @running = false
       @ui.paused()
       @mdbg.getStack()
 

@@ -84,7 +84,7 @@ class MobDebug
           if @requestQueue.length > 0
             @requestQueue.shift()
         when @responseStatus.break
-          running = false
+          @running = false
           filepath = path.resolve atom.project.getPaths()[0], '.'+message.split(' ')[2]
           line = message.match(///[0-9]+$///g)[0]
           @emitter.emit @debugEvents.pausedAtBreakpoint, {path: filepath, line: line}
@@ -129,9 +129,7 @@ class MobDebug
     @socket.write command.toUpperCase()+' '+arg+'\n'
 
   addBreakpoint: (breakpoint) ->
-    filepath = atom.project.relativizePath(breakpoint.path)[1]
-    if "#{filepath}" is "#{breakpoint.path}" then return
-    filepath =  @escapePath(filepath)
+    filepath = '/'+@escapePath(atom.project.relativizePath(breakpoint.path)[1])
     console.log filepath
     if @running
       @sendCommand @commands.setBreakpointAsync, [filepath, breakpoint.line], false
